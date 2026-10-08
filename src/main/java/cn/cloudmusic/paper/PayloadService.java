@@ -8,7 +8,7 @@ import java.util.Set;
 
 final class PayloadService {
     static final String PREFIX = "cloudmusic_sync:";
-    private static final Set<String> CHANNELS = Set.of("select_song", "playlist_import", "next_song", "clear_queue", "queue_action", "playback_mode");
+    private static final Set<String> CHANNELS = Set.of("select_song", "playlist_import", "next_song", "clear_queue", "queue_action", "playback_mode", "listening_action", "pause_action");
     private final JavaPlugin plugin;
     private MusicManager music;
 
@@ -26,7 +26,7 @@ final class PayloadService {
                 if (incoming.equals(PREFIX + channel)) plugin.getServer().getScheduler().runTask(plugin, () -> receive(channel, player, data));
             });
         }
-        for (String channel : new String[]{"play", "stop", "volume", "auth", "hud", "queue", "playlist_open", "menu_open", "search_open"}) {
+        for (String channel : new String[]{"play", "stop", "volume", "auth", "hud", "queue", "playlist_open", "menu_open", "search_open", "listening_state", "pause_state"}) {
             plugin.getServer().getMessenger().registerOutgoingPluginChannel(plugin, PREFIX + channel);
         }
     }
@@ -37,6 +37,14 @@ final class PayloadService {
 
     void broadcast(String channel, byte[] data) {
         for (Player player : plugin.getServer().getOnlinePlayers()) send(player, channel, data);
+    }
+
+    /** Broadcast to everyone except the given player UUIDs (personal-mode listeners). */
+    void broadcastExcept(String channel, byte[] data, Set<java.util.UUID> exclude) {
+        for (Player player : plugin.getServer().getOnlinePlayers()) {
+            if (exclude.contains(player.getUniqueId())) continue;
+            send(player, channel, data);
+        }
     }
 
     private void receive(String channel, Player player, byte[] data) {
@@ -57,6 +65,11 @@ final class PayloadService {
                     music.queueAction(player, reader.varInt(), reader.varInt());
                 }
                 case "playback_mode" -> music.setMode(player, Codec.reader(data).varInt());
+                case "listening_action" -> {
+                    Codec.PacketReader reader = Codec.reader(data);
+                    music.listeningAction(player, reader.varInt(), reader.string(80));
+                }
+                case "pause_action" -> music.togglePause(player);
             }
         } catch (IOException | RuntimeException exception) {
             player.sendMessage("§c服务端接收失败：数据无法读取，请确认客户端与服务器版本匹配");

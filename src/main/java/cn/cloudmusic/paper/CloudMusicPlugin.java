@@ -52,6 +52,7 @@ public final class CloudMusicPlugin extends JavaPlugin implements Listener {
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
         modReady.remove(event.getPlayer().getUniqueId());
+        music.onQuit(event.getPlayer().getUniqueId());
     }
 
     @EventHandler

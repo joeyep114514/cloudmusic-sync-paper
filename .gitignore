@@ -1,0 +1,17 @@
+# Gradle
+.gradle/
+build/
+
+# Local properties
+local.properties
+
+# IntelliJ IDEA
+.idea/
+*.iml
+
+# OS files
+.DS_Store
+Thumbs.db
+
+*.jar
+

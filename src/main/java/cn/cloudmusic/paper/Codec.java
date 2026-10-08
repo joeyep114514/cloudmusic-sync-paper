@@ -36,7 +36,7 @@ final class Codec {
         }
     }
 
-    static byte[] play(String songId, String title, String artist, String audioUrl, String coverUrl, long start, long duration) {
+    static byte[] play(String songId, String title, String artist, String audioUrl, String coverUrl, long start, long serverSentAt, long duration) {
         try {
             ByteArrayOutputStream bytes = new ByteArrayOutputStream();
             DataOutputStream out = new DataOutputStream(bytes);
@@ -46,11 +46,17 @@ final class Codec {
             writeString(out, audioUrl);
             writeString(out, coverUrl);
             writeVarLong(out, start);
+            writeVarLong(out, serverSentAt);
             writeVarLong(out, duration);
             return bytes.toByteArray();
         } catch (IOException exception) {
             throw new IllegalStateException(exception);
         }
+    }
+
+    /** Single byte 0/1, matching the client's boolean codec for pause_state. */
+    static byte[] bool(boolean value) {
+        return new byte[]{(byte) (value ? 1 : 0)};
     }
 
     static byte[] queue(String json) {

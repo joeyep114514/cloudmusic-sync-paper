@@ -28,6 +28,10 @@ final class MusicManager {
     private Song current;
     private long startedAt;
     private int mode;
+    /** Players in personal listening mode (local playback, no server audio). */
+    private final Set<UUID> personalPlayers = new HashSet<>();
+    private boolean paused;
+    private long pausedAt;
 
     MusicManager(JavaPlugin plugin, PayloadService payloads) {
         this.plugin = plugin;
@@ -35,6 +39,7 @@ final class MusicManager {
     }
 
     void tick() {
+        if (paused) return;
         if (current == null || startedAt + current.duration() > System.currentTimeMillis()) return;
         if (mode == 2) {
             start(current, "§b♫ 单曲循环：");
@@ -42,8 +47,8 @@ final class MusicManager {
         }
         if (queue.isEmpty()) {
             current = null;
-            payloads.broadcast("stop", Codec.empty());
-            payloads.broadcast("queue", queueData());
+            payloads.broadcastExcept("stop", Codec.empty(), personalPlayers);
+            payloads.broadcastExcept("queue", queueData(), personalPlayers);
             return;
         }
         if (mode == 1) queue.addLast(current);
@@ -56,6 +61,7 @@ final class MusicManager {
             payloads.send(player, "play", playData());
         }
         payloads.send(player, "queue", queueData());
+        sendListeningState(player);
     }
 
     void command(Player player, String[] args) {
@@ -156,7 +162,7 @@ final class MusicManager {
     void clear(Player player) {
         current = null;
         queue.clear();
-        payloads.broadcast("stop", Codec.empty());
+        payloads.broadcastExcept("stop", Codec.empty(), personalPlayers);
         broadcastQueue();
         announce("§7♫ " + player.getName() + " 清空了当前歌曲和播放队列");
     }
@@ -179,22 +185,65 @@ final class MusicManager {
         broadcastQueue();
     }
 
+    /** action: 0 = public (shared queue), 1 = personal (local playback only). */
+    void listeningAction(Player player, int action, String value) {
+        if (action == 1) {
+            personalPlayers.add(player.getUniqueId());
+        } else if (action == 0) {
+            personalPlayers.remove(player.getUniqueId());
+        } else {
+            player.sendMessage("§e无效的收听模式");
+            return;
+        }
+        sendListeningState(player);
+        if (action == 0) sync(player); // back on the shared queue: re-push current song + queue
+    }
+
+    void togglePause(Player player) {
+        if (current == null) {
+            player.sendMessage("§e当前没有播放的歌曲");
+            return;
+        }
+        long now = System.currentTimeMillis();
+        if (!paused) {
+            paused = true;
+            pausedAt = now;
+        } else {
+            paused = false;
+            startedAt += now - pausedAt; // extend the end time by the paused duration
+        }
+        payloads.broadcastExcept("pause_state", Codec.bool(paused), personalPlayers);
+        announce((paused ? "§6⏸ " : "§a▶ ") + player.getName() + (paused ? " 暂停了歌曲" : " 继续播放"));
+    }
+
+    void onQuit(UUID uuid) {
+        personalPlayers.remove(uuid);
+    }
+
     void shutdown() {
         queue.clear();
         current = null;
+        personalPlayers.clear();
+    }
+
+    private void sendListeningState(Player player) {
+        int mode = personalPlayers.contains(player.getUniqueId()) ? 1 : 0;
+        payloads.send(player, "listening_state", Codec.strings("{\"mode\":" + mode + "}"));
     }
 
     private void start(Song song, String message) {
         current = song;
         startedAt = System.currentTimeMillis() + 2500;
+        paused = false; // a new song always starts playing
         announce(message + song.title() + " - " + song.artist());
-        payloads.broadcast("play", playData());
+        payloads.broadcastExcept("play", playData(), personalPlayers);
         broadcastQueue();
     }
 
     private byte[] playData() {
         String audio = "https://music.163.com/song/media/outer/url?id=" + current.id() + ".mp3";
-        return Codec.play(current.id(), current.title(), current.artist(), audio, current.cover(), startedAt, current.duration());
+        // 5 strings + 3 varlongs (startAt / serverSentAt / duration) to match the client's PlayPayload
+        return Codec.play(current.id(), current.title(), current.artist(), audio, current.cover(), startedAt, System.currentTimeMillis(), current.duration());
     }
 
     private byte[] queueData() {
@@ -215,7 +264,7 @@ final class MusicManager {
     }
 
     private void broadcastQueue() {
-        payloads.broadcast("queue", queueData());
+        payloads.broadcastExcept("queue", queueData(), personalPlayers);
     }
 
     private void announce(String message) {
